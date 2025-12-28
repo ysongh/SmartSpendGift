@@ -1,0 +1,288 @@
+import { useState } from 'react';
+import { createPublicClient, http, parseEther } from 'viem';
+import { sepolia } from 'viem/chains';
+import { createBundlerClient } from 'viem/account-abstraction';
+import { Implementation, toMetaMaskSmartAccount } from '@metamask/smart-accounts-kit';
+import { privateKeyToAccount } from 'viem/accounts';
+
+export default function SmartAccount() {
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [smartAccountAddress, setSmartAccountAddress] = useState('');
+  const [txHash, setTxHash] = useState('');
+  const [privateKey, setPrivateKey] = useState('');
+  const [bundlerUrl, setBundlerUrl] = useState('');
+  const [recipientAddress, setRecipientAddress] = useState('');
+  const [amount, setAmount] = useState('0.001');
+
+  const createSmartAccount = async () => {
+    setLoading(true);
+    setStatus('Creating smart account...');
+    
+    try {
+      // Validate inputs
+      if (!privateKey.startsWith('0x') || privateKey.length !== 66) {
+        throw new Error('Invalid private key format. Must start with 0x and be 66 characters long');
+      }
+      
+      if (!bundlerUrl.startsWith('http')) {
+        throw new Error('Invalid bundler URL. Must start with http:// or https://');
+      }
+
+      // 1. Set up Public Client
+      const publicClient = createPublicClient({
+        chain: sepolia,
+        transport: http(),
+      });
+
+      setStatus('Setting up bundler client...');
+
+      // 2. Set up Bundler Client
+      const bundlerClient = createBundlerClient({
+        client: publicClient,
+        transport: http(bundlerUrl),
+      });
+
+      setStatus('Creating account from private key...');
+
+      // 3. Create account from private key
+      const account = privateKeyToAccount(privateKey);
+
+      setStatus('Creating MetaMask smart account...');
+
+      // 4. Create MetaMask Smart Account
+      const smartAccount = await toMetaMaskSmartAccount({
+        client: publicClient,
+        implementation: Implementation.Hybrid,
+        deployParams: [account.address, [], [], []],
+        deploySalt: '0x',
+        signer: { account },
+      });
+
+      setSmartAccountAddress(smartAccount.address);
+      setStatus(`Smart account created! Address: ${smartAccount.address}`);
+      
+      return { smartAccount, bundlerClient };
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+      setLoading(false);
+      throw error;
+    }
+  };
+
+  const sendUserOperation = async () => {
+    setLoading(true);
+    setStatus('Preparing to send user operation...');
+
+    try {
+      if (!recipientAddress.startsWith('0x') || recipientAddress.length !== 42) {
+        throw new Error('Invalid recipient address format');
+      }
+
+      const { smartAccount, bundlerClient } = await createSmartAccount();
+
+      setStatus('Estimating gas...');
+
+      // Get gas estimates from the network
+      const publicClient = createPublicClient({
+        chain: sepolia,
+        transport: http(),
+      });
+
+      const gasPrice = await publicClient.getGasPrice();
+      const maxFeePerGas = (gasPrice * 120n) / 100n; // 20% buffer
+      const maxPriorityFeePerGas = gasPrice / 10n;
+
+      setStatus('Sending user operation...');
+
+      // 5. Send User Operation
+      const userOperationHash = await bundlerClient.sendUserOperation({
+        account: smartAccount,
+        calls: [
+          {
+            to: recipientAddress,
+            value: parseEther(amount),
+          },
+        ],
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+      });
+
+      setTxHash(userOperationHash);
+      setStatus(`User operation sent! Hash: ${userOperationHash}`);
+
+      // Wait for receipt
+      setStatus('Waiting for transaction confirmation...');
+      const receipt = await bundlerClient.waitForUserOperationReceipt({
+        hash: userOperationHash,
+      });
+
+      setStatus(`Transaction confirmed! Block: ${receipt.receipt.blockNumber}`);
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateRandomKey = () => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    const hexKey = '0x' + Array.from(array)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    setPrivateKey(hexKey);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-purple-50 p-8">
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-white rounded-2xl shadow-xl p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center">
+              <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800">MetaMask Smart Account</h1>
+              <p className="text-gray-600 text-sm">Create and manage your smart account on Sepolia</p>
+            </div>
+          </div>
+
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Private Key (Owner)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                  placeholder="0x..."
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                />
+                <button
+                  onClick={generateRandomKey}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Generate
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">⚠️ For testing only. Never use real funds with generated keys.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Bundler RPC URL
+              </label>
+              <input
+                type="text"
+                value={bundlerUrl}
+                onChange={(e) => setBundlerUrl(e.target.value)}
+                placeholder="https://api.pimlico.io/v2/sepolia/rpc?apikey=YOUR_KEY"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Get a free bundler from Pimlico, Alchemy, or Stackup</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Recipient Address
+              </label>
+              <input
+                type="text"
+                value={recipientAddress}
+                onChange={(e) => setRecipientAddress(e.target.value)}
+                placeholder="0x..."
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Amount (ETH)
+              </label>
+              <input
+                type="text"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.001"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={sendUserOperation}
+            disabled={loading || !privateKey || !bundlerUrl || !recipientAddress}
+            className="w-full bg-gradient-to-r from-orange-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-orange-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+          >
+            {loading ? 'Processing...' : 'Create Smart Account & Send Transaction'}
+          </button>
+
+          {status && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800 font-medium mb-1">Status:</p>
+              <p className="text-sm text-blue-700 break-all">{status}</p>
+            </div>
+          )}
+
+          {smartAccountAddress && (
+            <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-800 font-medium mb-1">Smart Account Address:</p>
+              <p className="text-sm text-green-700 font-mono break-all">{smartAccountAddress}</p>
+            </div>
+          )}
+
+          {txHash && (
+            <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+              <p className="text-sm text-purple-800 font-medium mb-1">Transaction Hash:</p>
+              <a
+                href={`https://sepolia.etherscan.io/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-purple-700 font-mono break-all hover:underline"
+              >
+                {txHash}
+              </a>
+            </div>
+          )}
+
+          <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-xs text-yellow-800">
+              <strong>Note:</strong> This demo uses Sepolia testnet. Make sure your owner account has Sepolia ETH to pay for gas.
+              The smart account will be deployed automatically on the first transaction.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 bg-white rounded-xl shadow-lg p-6">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Setup Instructions</h2>
+          <ol className="space-y-3 text-sm text-gray-700">
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span>
+              <span>Install dependencies: <code className="bg-gray-100 px-2 py-1 rounded">npm install @metamask/smart-accounts-kit viem</code></span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span>
+              <span>Get Sepolia ETH from a faucet for your owner account</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">3</span>
+              <span>Get a bundler API key from Pimlico, Alchemy, or Stackup</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">4</span>
+              <span>Enter your private key and bundler URL above</span>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+}
