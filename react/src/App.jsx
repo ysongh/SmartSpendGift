@@ -3,7 +3,7 @@ function App() {
 
   return (
     <>
-      <h1>Smart Spend Gift</h1>
+      <h1 className="text-3xl">Smart Spend Gift</h1>
     </>
   )
 }
