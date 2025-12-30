@@ -3,74 +3,65 @@ import { createPublicClient, http, parseEther } from 'viem';
 import { sepolia } from 'viem/chains';
 import { createBundlerClient } from 'viem/account-abstraction';
 import { Implementation, toMetaMaskSmartAccount } from '@metamask/smart-accounts-kit';
-import { privateKeyToAccount } from 'viem/accounts';
+import { useAccount, useConnect, useDisconnect, useWalletClient, usePublicClient } from 'wagmi';
+import { injected } from 'wagmi/connectors';
 
 export default function SmartAccount() {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [smartAccountAddress, setSmartAccountAddress] = useState('');
   const [txHash, setTxHash] = useState('');
-  const [privateKey, setPrivateKey] = useState('');
   const [bundlerUrl, setBundlerUrl] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [amount, setAmount] = useState('0.001');
 
+  // Wagmi hooks
+  const { address, isConnected } = useAccount();
+  const { connect } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient();
+
   const createSmartAccount = async () => {
-    setLoading(true);
-    setStatus('Creating smart account...');
-    
-    try {
-      // Validate inputs
-      if (!privateKey.startsWith('0x') || privateKey.length !== 66) {
-        throw new Error('Invalid private key format. Must start with 0x and be 66 characters long');
-      }
-      
-      if (!bundlerUrl.startsWith('http')) {
-        throw new Error('Invalid bundler URL. Must start with http:// or https://');
-      }
-
-      // 1. Set up Public Client
-      const publicClient = createPublicClient({
-        chain: sepolia,
-        transport: http(),
-      });
-
-      setStatus('Setting up bundler client...');
-
-      // 2. Set up Bundler Client
-      const bundlerClient = createBundlerClient({
-        client: publicClient,
-        transport: http(bundlerUrl),
-      });
-
-      setStatus('Creating account from private key...');
-
-      // 3. Create account from private key
-      const account = privateKeyToAccount(privateKey);
-
-      setStatus('Creating MetaMask smart account...');
-
-      // 4. Create MetaMask Smart Account
-      const smartAccount = await toMetaMaskSmartAccount({
-        client: publicClient,
-        implementation: Implementation.Hybrid,
-        deployParams: [account.address, [], [], []],
-        deploySalt: '0x',
-        signer: { account },
-      });
-
-      setSmartAccountAddress(smartAccount.address);
-      setStatus(`Smart account created! Address: ${smartAccount.address}`);
-      
-      return { smartAccount, bundlerClient };
-    } catch (error) {
-      setStatus(`Error: ${error.message}`);
-      setLoading(false);
-      throw error;
+    if (!address || !walletClient || !publicClient) {
+      throw new Error('Wallet not connected or clients not available');
     }
+
+    if (!bundlerUrl.startsWith('http')) {
+      throw new Error('Invalid bundler URL. Must start with http:// or https://');
+    }
+
+    setStatus('Creating smart account...');
+
+    // Set up Bundler Client
+    const bundlerClient = createBundlerClient({
+      client: publicClient,
+      transport: http(bundlerUrl),
+    });
+
+    setStatus('Creating MetaMask smart account with your wallet...');
+
+    // Create MetaMask Smart Account using the connected wallet as signer
+    const smartAccount = await toMetaMaskSmartAccount({
+      client: publicClient,
+      implementation: Implementation.Hybrid,
+      deployParams: [address, [], [], []],
+      deploySalt: '0x',
+      signer: { walletClient },
+    });
+
+    setSmartAccountAddress(smartAccount.address);
+    setStatus(`Smart account created! Address: ${smartAccount.address}`);
+
+    return { smartAccount, bundlerClient };
   };
 
   const sendUserOperation = async () => {
+    if (!isConnected) {
+      setStatus('Please connect your wallet first');
+      return;
+    }
+
     setLoading(true);
     setStatus('Preparing to send user operation...');
 
@@ -83,19 +74,14 @@ export default function SmartAccount() {
 
       setStatus('Estimating gas...');
 
-      // Get gas estimates from the network
-      const publicClient = createPublicClient({
-        chain: sepolia,
-        transport: http(),
-      });
-
-      const gasPrice = await publicClient.getGasPrice();
-      const maxFeePerGas = (gasPrice * 120n) / 100n; // 20% buffer
+      // Get gas estimates
+      const gasPrice = await publicClient?.getGasPrice();
+      const maxFeePerGas = (gasPrice * 120n) / 100n;
       const maxPriorityFeePerGas = gasPrice / 10n;
 
       setStatus('Sending user operation...');
 
-      // 5. Send User Operation
+      // Send User Operation
       const userOperationHash = await bundlerClient.sendUserOperation({
         account: smartAccount,
         calls: [
@@ -125,13 +111,8 @@ export default function SmartAccount() {
     }
   };
 
-  const generateRandomKey = () => {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    const hexKey = '0x' + Array.from(array)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    setPrivateKey(hexKey);
+  const formatAddress = (addr) => {
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
 
   return (
@@ -149,33 +130,50 @@ export default function SmartAccount() {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-gray-800">MetaMask Smart Account</h1>
-              <p className="text-gray-600 text-sm">Create and manage your smart account on Sepolia</p>
+              <p className="text-gray-600 text-sm">Connect wallet and create your smart account</p>
             </div>
           </div>
 
-          <div className="space-y-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Private Key (Owner)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={privateKey}
-                  onChange={(e) => setPrivateKey(e.target.value)}
-                  placeholder="0x..."
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                />
-                <button
-                  onClick={generateRandomKey}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-                >
-                  Generate
-                </button>
+          {/* Wallet Connection Status */}
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {isConnected ? (
+                  <>
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium text-gray-700">
+                      Connected: {formatAddress(address)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <span className="text-sm font-medium text-gray-700">Not connected</span>
+                  </>
+                )}
               </div>
-              <p className="text-xs text-gray-500 mt-1">⚠️ For testing only. Never use real funds with generated keys.</p>
+              <button
+                onClick={() => isConnected ? disconnect() : connect({ connector: injected() })}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  isConnected
+                    ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                }`}
+              >
+                {isConnected ? 'Disconnect' : 'Connect Wallet'}
+              </button>
             </div>
+          </div>
 
+          {!isConnected && (
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                👆 Please connect your wallet to continue. Your wallet will be used as the owner/signer for the smart account.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-4 mb-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Bundler RPC URL
@@ -186,6 +184,7 @@ export default function SmartAccount() {
                 onChange={(e) => setBundlerUrl(e.target.value)}
                 placeholder="https://api.pimlico.io/v2/sepolia/rpc?apikey=YOUR_KEY"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                disabled={!isConnected}
               />
               <p className="text-xs text-gray-500 mt-1">Get a free bundler from Pimlico, Alchemy, or Stackup</p>
             </div>
@@ -200,6 +199,7 @@ export default function SmartAccount() {
                 onChange={(e) => setRecipientAddress(e.target.value)}
                 placeholder="0x..."
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                disabled={!isConnected}
               />
             </div>
 
@@ -213,13 +213,14 @@ export default function SmartAccount() {
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.001"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                disabled={!isConnected}
               />
             </div>
           </div>
 
           <button
             onClick={sendUserOperation}
-            disabled={loading || !privateKey || !bundlerUrl || !recipientAddress}
+            disabled={loading || !isConnected || !bundlerUrl || !recipientAddress}
             className="w-full bg-gradient-to-r from-orange-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-orange-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-[1.02] active:scale-[0.98]"
           >
             {loading ? 'Processing...' : 'Create Smart Account & Send Transaction'}
@@ -255,7 +256,7 @@ export default function SmartAccount() {
 
           <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <p className="text-xs text-yellow-800">
-              <strong>Note:</strong> This demo uses Sepolia testnet. Make sure your owner account has Sepolia ETH to pay for gas.
+              <strong>Note:</strong> This demo uses Sepolia testnet. Your connected wallet must have Sepolia ETH to pay for gas.
               The smart account will be deployed automatically on the first transaction.
             </p>
           </div>
@@ -266,19 +267,23 @@ export default function SmartAccount() {
           <ol className="space-y-3 text-sm text-gray-700">
             <li className="flex gap-3">
               <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span>
-              <span>Install dependencies: <code className="bg-gray-100 px-2 py-1 rounded">npm install @metamask/smart-accounts-kit viem</code></span>
+              <span>Install dependencies: <code className="bg-gray-100 px-2 py-1 rounded">npm install @metamask/smart-accounts-kit viem wagmi @tanstack/react-query</code></span>
             </li>
             <li className="flex gap-3">
               <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span>
-              <span>Get Sepolia ETH from a faucet for your owner account</span>
+              <span>Set up Wagmi provider in your app (see setup code below)</span>
             </li>
             <li className="flex gap-3">
               <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">3</span>
-              <span>Get a bundler API key from Pimlico, Alchemy, or Stackup</span>
+              <span>Get Sepolia ETH from a faucet for your connected wallet</span>
             </li>
             <li className="flex gap-3">
               <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">4</span>
-              <span>Enter your private key and bundler URL above</span>
+              <span>Get a bundler API key from Pimlico, Alchemy, or Stackup</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">5</span>
+              <span>Connect your wallet and enter bundler URL</span>
             </li>
           </ol>
         </div>
