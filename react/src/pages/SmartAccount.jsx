@@ -56,6 +56,24 @@ export default function SmartAccount() {
     return { smartAccount, bundlerClient };
   };
 
+  const previewSmartAccount = async () => {
+    if (!isConnected) {
+      setStatus('Please connect your wallet first');
+      return;
+    }
+
+    setLoading(true);
+    setStatus('Generating smart account address...');
+
+    try {
+      await createSmartAccount();
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const sendUserOperation = async () => {
     if (!isConnected) {
       setStatus('Please connect your wallet first');
@@ -71,6 +89,19 @@ export default function SmartAccount() {
       }
 
       const { smartAccount, bundlerClient } = await createSmartAccount();
+
+      // Check smart account balance
+      setStatus('Checking smart account balance...');
+      const balance = await publicClient?.getBalance({ address: smartAccount.address });
+      const balanceInEth = Number(balance) / 1e18;
+      
+      if (balance === 0n) {
+        setStatus(`⚠️ Smart account has no funds! Please send Sepolia ETH to: ${smartAccount.address}`);
+        setLoading(false);
+        return;
+      }
+      
+      setStatus(`Smart account balance: ${balanceInEth.toFixed(6)} ETH`);
 
       setStatus('Estimating gas...');
 
@@ -218,13 +249,23 @@ export default function SmartAccount() {
             </div>
           </div>
 
-          <button
-            onClick={sendUserOperation}
-            disabled={loading || !isConnected || !bundlerUrl || !recipientAddress}
-            className="w-full bg-gradient-to-r from-orange-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-orange-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-[1.02] active:scale-[0.98]"
-          >
-            {loading ? 'Processing...' : 'Create Smart Account & Send Transaction'}
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={previewSmartAccount}
+              disabled={loading || !isConnected || !bundlerUrl}
+              className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-blue-600 hover:to-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+            >
+              {loading ? 'Processing...' : 'Preview Smart Account'}
+            </button>
+            
+            <button
+              onClick={sendUserOperation}
+              disabled={loading || !isConnected || !bundlerUrl || !recipientAddress || !smartAccountAddress}
+              className="flex-1 bg-gradient-to-r from-orange-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-orange-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+            >
+              {loading ? 'Processing...' : 'Send Transaction'}
+            </button>
+          </div>
 
           {status && (
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -235,8 +276,26 @@ export default function SmartAccount() {
 
           {smartAccountAddress && (
             <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm text-green-800 font-medium mb-1">Smart Account Address:</p>
-              <p className="text-sm text-green-700 font-mono break-all">{smartAccountAddress}</p>
+              <p className="text-sm text-green-800 font-medium mb-2">Smart Account Address:</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-green-700 font-mono break-all flex-1">{smartAccountAddress}</p>
+                <button
+                  onClick={() => navigator.clipboard.writeText(smartAccountAddress)}
+                  className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <div className="mt-3 p-3 bg-white rounded border border-green-300">
+                <p className="text-xs text-green-800 font-semibold mb-1">⚠️ Important: Fund this address first!</p>
+                <p className="text-xs text-green-700">
+                  Send at least 0.01 Sepolia ETH to this smart account address before sending transactions.
+                  Get free Sepolia ETH from{' '}
+                  <a href="https://sepoliafaucet.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">
+                    sepoliafaucet.com
+                  </a>
+                </p>
+              </div>
             </div>
           )}
 
