@@ -107,9 +107,8 @@ export default function SmartAccount() {
 
       // Get gas estimates
       const gasPrice = await publicClient?.getGasPrice();
-      const maxFeePerGas = (gasPrice * 120n) / 100n;
-      const maxPriorityFeePerGas = gasPrice / 10n;
-
+      const maxPriorityFeePerGas = 2000000000n;
+      const maxFeePerGas = (gasPrice * 2n) + maxPriorityFeePerGas; 
       setStatus('Sending user operation...');
 
       // Send User Operation
