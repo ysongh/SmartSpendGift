@@ -1,9 +1,11 @@
 {
-  "name": "SmartSpendGift",
+  "name": "smartspendgift",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
+    "node": "cd hardhat && npx hardhat node",
+    "deploylocal": "cd hardhat && npx hardhat ignition deploy ./ignition/modules/OnchainGiftCards.ts --network localhost",
     "dev": "cd react && pnpm dev",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
