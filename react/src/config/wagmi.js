@@ -1,16 +1,17 @@
 import { http, createConfig } from 'wagmi'
-import { sepolia } from 'wagmi/chains'
-import { injected, metaMask, walletConnect } from 'wagmi/connectors'
+import { tempoTestnet } from 'wagmi/chains'
+import { injected, metaMask } from 'wagmi/connectors'
 
 export const wagmiConfig = createConfig({
-  chains: [sepolia],
+  chains: [tempoTestnet],
   connectors: [
     injected(),
     metaMask(),
     // Optional: add WalletConnect
     // walletConnect({ projectId: 'YOUR_PROJECT_ID' })
   ],
+  multiInjectedProviderDiscovery: true, 
   transports: {
-    [sepolia.id]: http(),
+    [tempoTestnet.id]: http(),
   },
 })
